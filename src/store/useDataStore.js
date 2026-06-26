@@ -13,9 +13,11 @@ import {
   fetchTeamCostoNormalizado,
   fetchVentasDolarizadas,
   fetchDatosLooker,
+  fetchCostosMensualizados,
   TAB_TEAM,
   TAB_VENTAS,
   TAB_DATOS_LOOKER,
+  TAB_COSTOS_MENSUALIZADOS,
 } from '../services/sheetsService'
 import {
   fetchDolarBlue,
@@ -60,6 +62,13 @@ const useDataStore = create((set, get) => ({
   ventasError: null,
   ventasLastFetch: null,
 
+  // ── Costos Mensualizados (costo real por mes 2026) ───────────────────────
+  teamMensualData: null,
+  teamMensualSource: 'none',
+  teamMensualLoading: false,
+  teamMensualError: null,
+  teamMensualLastFetch: null,
+
   // ── Datos Looker (P&L mensual) ────────────────────────────────────────────
   lookerData: null,
   lookerSource: 'local',
@@ -92,6 +101,46 @@ const useDataStore = create((set, get) => ({
       set({ teamError: err.message })
     } finally {
       set({ teamLoading: false })
+    }
+  },
+
+  // ── Fetch: Costos Mensualizados ───────────────────────────────────────────
+  fetchTeamMensual: async () => {
+    if (!isConfigured()) return
+    set({ teamMensualLoading: true, teamMensualError: null })
+    try {
+      const data = await fetchCostosMensualizados(TAB_COSTOS_MENSUALIZADOS)
+      if (data && data.length > 0) {
+        set({ teamMensualData: data, teamMensualSource: 'sheets', teamMensualLastFetch: Date.now() })
+      }
+    } catch (err) {
+      set({ teamMensualError: err.message })
+    } finally {
+      set({ teamMensualLoading: false })
+    }
+  },
+
+  // Deriva teamData para un mes específico a partir de teamMensualData.
+  // Mantiene la misma forma que teamData estático para que todo downstream funcione sin cambios.
+  setTeamDataForMonth: (month) => {
+    const { teamMensualData } = get()
+    if (!teamMensualData || !month) return
+    const derived = teamMensualData
+      .map(p => {
+        const costoMensualARS = p.costoByMonth[month] || 0
+        if (costoMensualARS === 0) return null
+        return {
+          nombre: p.nombre,
+          costoMensualARS,
+          costoAnualARS: costoMensualARS * 12,
+          neto: costoMensualARS,
+          ...(p.esOverhead && { esOverhead: true, categoria: p.categoria || p.nombre }),
+          ...(p.cLevelOperativo && { cLevelOperativo: true }),
+        }
+      })
+      .filter(Boolean)
+    if (derived.length > 0) {
+      set({ teamData: derived, teamSource: 'sheets' })
     }
   },
 
@@ -164,16 +213,16 @@ const useDataStore = create((set, get) => ({
 
   // ── Refresh All ───────────────────────────────────────────────────────────
   refreshAll: async () => {
-    const { fetchTeam, fetchVentas, fetchRate, fetchLooker } = get()
-    await Promise.allSettled([fetchTeam(), fetchVentas(), fetchRate(true), fetchLooker()])
+    const { fetchTeam, fetchTeamMensual, fetchVentas, fetchRate, fetchLooker } = get()
+    await Promise.allSettled([fetchTeam(), fetchTeamMensual(), fetchVentas(), fetchRate(true), fetchLooker()])
   },
 
   // ── Initialize (called once from Layout) ──────────────────────────────────
   initialize: async () => {
     if (get()._initialized) return
     set({ _initialized: true })
-    const { fetchTeam, fetchVentas, fetchRate, fetchLooker, startAutoRefresh } = get()
-    await Promise.allSettled([fetchTeam(), fetchVentas(), fetchRate(), fetchLooker()])
+    const { fetchTeam, fetchTeamMensual, fetchVentas, fetchRate, fetchLooker, startAutoRefresh } = get()
+    await Promise.allSettled([fetchTeam(), fetchTeamMensual(), fetchVentas(), fetchRate(), fetchLooker()])
     startAutoRefresh()
   },
 

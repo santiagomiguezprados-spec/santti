@@ -12,11 +12,12 @@ const SHEET_ID        = import.meta.env.VITE_GOOGLE_SHEET_ID
 const API_KEY         = import.meta.env.VITE_GOOGLE_API_KEY
 const BASE            = 'https://sheets.googleapis.com/v4/spreadsheets'
 
-export const LOOKER_SHEET_ID    = import.meta.env.VITE_LOOKER_SHEET_ID
-export const TAB_VENTAS         = import.meta.env.VITE_TAB_VENTAS        || 'Ventas Dolarizadas'
-export const TAB_TEAM           = import.meta.env.VITE_TAB_TEAM          || 'Team Costo Normalizado'
-export const TAB_SUELDOS        = import.meta.env.VITE_TAB_SUELDOS       || 'Sueldos'
-export const TAB_DATOS_LOOKER   = import.meta.env.VITE_TAB_DATOS_LOOKER  || 'Datos - Global'
+export const LOOKER_SHEET_ID              = import.meta.env.VITE_LOOKER_SHEET_ID
+export const TAB_VENTAS                   = import.meta.env.VITE_TAB_VENTAS                   || 'Ventas Dolarizadas'
+export const TAB_TEAM                     = import.meta.env.VITE_TAB_TEAM                     || 'Team Costo Normalizado'
+export const TAB_COSTOS_MENSUALIZADOS     = import.meta.env.VITE_TAB_COSTOS_MENSUALIZADOS     || 'Costos Mensualizados'
+export const TAB_SUELDOS                  = import.meta.env.VITE_TAB_SUELDOS                  || 'Sueldos'
+export const TAB_DATOS_LOOKER             = import.meta.env.VITE_TAB_DATOS_LOOKER             || 'Datos - Global'
 
 /** True si las variables de entorno del sheet principal están configuradas */
 export const isConfigured = () =>
@@ -244,6 +245,59 @@ export async function fetchVentasDolarizadas(tabName = 'Ventas Dolarizadas') {
       meses: mesHeaders,
     }
   }).filter(Boolean)
+}
+
+// ─────────────────────────────────────────────
+// COSTOS MENSUALIZADOS  →  costo real por persona y mes (2026)
+// Fila 1: headers "persona" + columnas numéricas 1–12 (ene-26…dic-26)
+// Cada celda: costo mensual totalizado en ARS para esa persona y mes
+// ─────────────────────────────────────────────
+const MES_NUM_TO_KEY = {
+  '1':'ene-26','2':'feb-26','3':'mar-26','4':'abr-26',
+  '5':'may-26','6':'jun-26','7':'jul-26','8':'ago-26',
+  '9':'sept-26','10':'oct-26','11':'nov-26','12':'dic-26',
+}
+
+export async function fetchCostosMensualizados(tabName = TAB_COSTOS_MENSUALIZADOS) {
+  const rows = await getRange(SHEET_ID, tabName)
+  if (!rows.length) return []
+
+  const [headers, ...data] = rows
+  // Identificar columna de nombre y columnas de meses
+  const nombreIdx = headers.findIndex(h => /persona|nombre|team/i.test(h.trim()))
+  if (nombreIdx === -1) return []
+
+  const mesColMap = {} // { colIndex: 'ene-26', ... }
+  headers.forEach((h, i) => {
+    const key = MES_NUM_TO_KEY[h.trim()]
+    if (key) mesColMap[i] = key
+  })
+
+  return data
+    .filter(row => row.some(cell => cell?.toString().trim()))
+    .map(row => {
+      const nombre = row[nombreIdx]?.toString().trim()
+      if (!nombre) return null
+
+      const costoByMonth = {}
+      Object.entries(mesColMap).forEach(([i, mesKey]) => {
+        costoByMonth[mesKey] = num(row[i]) || 0
+      })
+
+      const cLevelFlags = detectCLevel(nombre)
+      const catRaw = ''
+      const esOverhead = !!cLevelFlags || ['ceo','cmo','coo','overhead','c-level'].some(k =>
+        nombre.toLowerCase().includes(k)
+      )
+      const cLevelOperativo = cLevelFlags?.cLevelOperativo || false
+
+      return {
+        nombre,
+        costoByMonth,
+        ...(esOverhead && { esOverhead: true, categoria: catRaw || nombre }),
+        ...(cLevelOperativo && { cLevelOperativo: true }),
+      }
+    }).filter(Boolean)
 }
 
 /** Expone los nombres de las solapas disponibles en el spreadsheet */

@@ -7,34 +7,38 @@
  * 2. Sincroniza las asignaciones del POD designer cuando cambian los datos
  *    (nuevos costos de equipo, cambios de revenue, rotacion de personal)
  */
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import useDataStore from '../store/useDataStore'
 import usePodDesignStore from '../store/usePodDesignStore'
 import useGlobalPeriod from './useGlobalPeriod'
 import { isSupabaseConfigured } from '../lib/supabase'
 
 export default function useDataOrchestrator() {
-  const initialize = useDataStore(s => s.initialize)
-  const teamData   = useDataStore(s => s.teamData)
-  const ventasData = useDataStore(s => s.ventasData)
-  const rate       = useDataStore(s => s.rate)
-  const teamSource = useDataStore(s => s.teamSource)
-  const ventasSource = useDataStore(s => s.ventasSource)
+  const initialize           = useDataStore(s => s.initialize)
+  const teamData             = useDataStore(s => s.teamData)
+  const teamMensualData      = useDataStore(s => s.teamMensualData)
+  const setTeamDataForMonth  = useDataStore(s => s.setTeamDataForMonth)
+  const ventasData           = useDataStore(s => s.ventasData)
+  const rate                 = useDataStore(s => s.rate)
+  const teamSource           = useDataStore(s => s.teamSource)
+  const ventasSource         = useDataStore(s => s.ventasSource)
 
   const syncWithLiveData = usePodDesignStore(s => s.syncWithLiveData)
   const loadFromSupabase = usePodDesignStore(s => s.loadFromSupabase)
   const selectedMonth = useGlobalPeriod(s => s.selectedMonth)
   const setAvailableMonths = useGlobalPeriod(s => s.setAvailableMonths)
 
-  // Track whether we've done the initial sync
-  const hasSynced = useRef(false)
-  const prevTeamTs = useRef(null)
-  const prevVentasTs = useRef(null)
-
   // 1. Initialize data store on mount
   useEffect(() => {
     initialize()
   }, [initialize])
+
+  // 1d. Cuando llegan los costos mensualizados o cambia el período, derivar teamData para ese mes
+  useEffect(() => {
+    if (teamMensualData && selectedMonth) {
+      setTeamDataForMonth(selectedMonth)
+    }
+  }, [teamMensualData, selectedMonth, setTeamDataForMonth])
 
   // 1c. Load POD config from Supabase on mount (overrides localStorage)
   useEffect(() => {
